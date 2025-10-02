@@ -5,6 +5,7 @@ import { Pool } from 'pg';
 import admin from 'firebase-admin';
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { GoogleGenAI } from "@google/genai";
 dotenv.config();
 
 const app = express();
@@ -55,30 +56,45 @@ app.post('/api/candidates', verifyToken, async (req, res) => {
 app.post('/api/generate-questions', verifyToken, async (req, res) => {
   const { role = 'Full Stack React/Node', difficulty = ["Easy", "Medium", "Hard"], count = 6, candidate } = req.body;
   try {
-    // Call Gemini API (replace with your actual Gemini endpoint and key)
-    const geminiRes = await axios.post(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
-      {
-        contents: [{
-          parts: [{
-            text: `Generate ${count} interview questions for a ${role} role. 2 Easy, 2 Medium, 2 Hard. Return as JSON array with fields: level, question.`
-          }]
-        }]
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.GEMINI_API_KEY}`
-        }
-      }
-    );
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const prompt = `Generate ${count} interview questions for a ${role} role. 2 Easy, 2 Medium, 2 Hard. Return as JSON array with fields: level, question.`;
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+    });
+    // Debug: log the raw Gemini response
+    console.log('Gemini raw response:', JSON.stringify(response, null, 2));
     // Parse Gemini response
-    const questions = JSON.parse(geminiRes.data.candidates?.[0]?.content?.parts?.[0]?.text || '[]');
+    let questions = [];
+    if (response && response.text) {
+      try {
+        questions = JSON.parse(response.text);
+      } catch (e) {
+        console.error('Failed to parse Gemini response as JSON:', response.text);
+      }
+    }
     res.json({ questions });
   } catch (err) {
+    // Improved error logging
     console.error('Gemini error:', err);
-    res.status(500).json({ error: 'Failed to generate questions' });
+    res.status(500).json({ error: 'Failed to generate questions', details: err.message });
   }
+});
+
+// Helper to check interviewer claim
+function isInterviewerFromClaims(user) {
+  return user.interviewer === true || (user.customClaims && user.customClaims.interviewer === true);
+}
+
+// Endpoint to get current user info and role (Firebase claim-based)
+app.get('/api/me', verifyToken, (req, res) => {
+  const { email, name, uid, interviewer, customClaims } = req.user;
+  res.json({
+    email,
+    name,
+    uid,
+    isInterviewer: isInterviewerFromClaims(req.user)
+  });
 });
 
 // Health check

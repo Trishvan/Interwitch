@@ -13,12 +13,34 @@ const { Dragger } = Upload;
 const { Title } = Typography;
 
 function extractFields(text) {
-  // Simple regex-based extraction
+  // Try to extract name from 'Name:' or from the first non-empty line (common in resumes)
+  let name = '';
   const nameMatch = text.match(/Name[:\s]+([A-Za-z .'-]+)/i);
+  if (nameMatch) {
+    name = nameMatch[1].trim();
+  } else {
+    // Fallback: use the first non-empty line, assuming it's the name
+    const lines = text.split(/\r?\n|(?<=\.) /).map(l => l.trim()).filter(Boolean);
+    if (lines.length > 0 && lines[0].length < 60 && !lines[0].match(/(curriculum vitae|resume|email|phone|contact|summary|profile|objective|\d{4})/i)) {
+      name = lines[0];
+    } else {
+      // Extra fallback: try first 5 words, skipping common non-name words
+      const words = text.split(/\s+/).filter(Boolean);
+      const skipWords = ['curriculum', 'vitae', 'resume', 'email', 'phone', 'contact', 'summary', 'profile', 'objective'];
+      let possibleName = words.slice(0, 5).join(' ');
+      if (!skipWords.some(w => possibleName.toLowerCase().includes(w))) {
+        name = possibleName;
+      }
+    }
+  }
   const emailMatch = text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
   const phoneMatch = text.match(/(\+?\d{1,3}[\s-]?)?(\(?\d{3}\)?[\s-]?)?\d{3}[\s-]?\d{4}/);
+  // Debug: show what was extracted
+  if (!name) {
+    console.warn('extractFields: Could not extract name. Text sample:', text.slice(0, 200));
+  }
   return {
-    name: nameMatch ? nameMatch[1].trim() : '',
+    name,
     email: emailMatch ? emailMatch[0] : '',
     phone: phoneMatch ? phoneMatch[0] : '',
   };
@@ -101,8 +123,9 @@ function IntervieweeChat({ user }) {
     setApiError('');
     try {
       const token = await user.getIdToken();
+      console.log('VITE_API_URL:', import.meta.env.VITE_API_URL);
       const res = await axios.post(
-        import.meta.env.VITE_API_URL + '/generate-questions',
+        import.meta.env.VITE_API_URL + '/api/generate-questions',
         {
           role: 'Full Stack React/Node',
           candidate: fields,
@@ -116,7 +139,17 @@ function IntervieweeChat({ user }) {
       setChatStarted(true);
       setTimerState(questions[0].time || 20);
     } catch (err) {
-      setApiError('Failed to fetch questions. Please try again.');
+      let msg = 'Failed to fetch questions. Please try again.';
+      if (err.response) {
+        msg += ` (Status: ${err.response.status})`;
+        if (err.response.data && err.response.data.error) {
+          msg += ` - ${err.response.data.error}`;
+        }
+      } else if (err.message) {
+        msg += ` (${err.message})`;
+      }
+      setApiError(msg);
+      console.error('fetchQuestions error:', err);
     } finally {
       setLoadingQuestions(false);
     }
