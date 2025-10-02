@@ -16,7 +16,7 @@ try {
 }
 
 // Replace with the email of the user you want to make an interviewer
-const email = 'interviewer1@example.com'; // <-- CHANGE THIS
+const email = 'gogaf80497@protonza.com'; // <-- CHANGE THIS
 
 async function setInterviewerClaim() {
   try {

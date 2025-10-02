@@ -15,3 +15,11 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const analytics = getAnalytics(app);
+
+auth.onAuthStateChanged(user => {
+  if (user) {
+    user.getIdToken().then(token => {
+      console.log(token);
+    });
+  }
+});

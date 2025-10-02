@@ -23,18 +23,33 @@ function App() {
   const navigate = useNavigate();
 
   React.useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       setAuthModal(!u);
-      // Example: check for custom claim or email domain
-      // Here, you can set accountType based on user info
-      // For demo, use email: if contains 'interviewer', set as interviewer
-      if (u?.email?.includes('interviewer')) {
-        setAccountType('interviewer');
-        navigate('/dashboard');
+      if (u) {
+        // Get Firebase token
+        const token = await u.getIdToken(true); // force refresh to get latest claims
+        // Fetch user info from backend
+        try {
+          const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/me`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          const userInfo = await res.json();
+          console.log('User info from /api/me:', userInfo); // <-- Add debug log
+          if (userInfo.isInterviewer) {
+            setAccountType('interviewer');
+            navigate('/dashboard');
+          } else {
+            setAccountType('candidate');
+            navigate('/chat');
+          }
+        } catch (e) {
+          setAccountType('candidate');
+          navigate('/chat');
+        }
       } else {
         setAccountType('candidate');
-        navigate('/chat');
+        navigate('/');
       }
     });
     return () => unsubscribe();

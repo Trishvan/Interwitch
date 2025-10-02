@@ -1,10 +1,32 @@
-import React from 'react';
-import { Card, Table, Typography } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Card, Table, Typography, message } from 'antd';
 
 const { Title } = Typography;
 
 function InterviewerDashboard() {
-  // Placeholder for dashboard logic
+  const [candidates, setCandidates] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    async function fetchCandidates() {
+      setLoading(true);
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/candidates`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('Failed to fetch candidates');
+        const data = await res.json();
+        setCandidates(data);
+      } catch (err) {
+        message.error('Could not load candidates');
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchCandidates();
+  }, []);
+
   return (
     <Card style={{ margin: 24 }}>
       <Title level={3}>Interviewer Dashboard</Title>
@@ -14,8 +36,9 @@ function InterviewerDashboard() {
           { title: 'Email', dataIndex: 'email', key: 'email' },
           { title: 'Score', dataIndex: 'score', key: 'score', sorter: true },
         ]}
-        dataSource={[]}
+        dataSource={candidates}
         rowKey="id"
+        loading={loading}
       />
       {/* TODO: Candidate details, chat history, summary, search/sort */}
     </Card>

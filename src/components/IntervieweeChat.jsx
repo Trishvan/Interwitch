@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Card, Upload, Button, message, Typography, Form, Input, Modal } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
-// PDF.js worker setup for version 3.11.174
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
 import mammoth from 'mammoth';
@@ -46,15 +45,6 @@ function extractFields(text) {
   };
 }
 
-const QUESTION_SET = [
-  { level: 'Easy', time: 20, text: 'What is React and why is it useful?' },
-  { level: 'Easy', time: 20, text: 'Explain the virtual DOM.' },
-  { level: 'Medium', time: 60, text: 'How does Redux help manage state in React apps?' },
-  { level: 'Medium', time: 60, text: 'Describe the lifecycle of a React component.' },
-  { level: 'Hard', time: 120, text: 'How would you optimize a large React app for performance?' },
-  { level: 'Hard', time: 120, text: 'Explain server-side rendering and its benefits for React.' },
-];
-
 function IntervieweeChat({ user }) {
   const [fields, setFields] = useState({ name: '', email: '', phone: '' });
   const [missing, setMissing] = useState([]);
@@ -64,8 +54,10 @@ function IntervieweeChat({ user }) {
   const [chatStarted, setChatStarted] = useState(false);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
   const [apiError, setApiError] = useState('');
+  const [questions, setQuestions] = useState([]); // Store dynamic questions
+  const [previousQuestions, setPreviousQuestions] = useState([]); // Track all previous questions
+  const [progress, setProgress] = useState(0); // Track current question index
   const dispatch = useDispatch();
-  const interview = useSelector(state => state.interview);
 
   const handleResume = async (file) => {
     if (
@@ -123,21 +115,22 @@ function IntervieweeChat({ user }) {
     setApiError('');
     try {
       const token = await user.getIdToken();
-      console.log('VITE_API_URL:', import.meta.env.VITE_API_URL);
       const res = await axios.post(
         import.meta.env.VITE_API_URL + '/api/generate-questions',
         {
           role: 'Full Stack React/Node',
           candidate: fields,
+          previousQuestions: previousQuestions, // Send previous questions
         },
         {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
-      const questions = res.data.questions;
-      dispatch(startInterview({ questions }));
+      const newQuestions = res.data.questions;
+      setQuestions(newQuestions);
+      setProgress(0);
       setChatStarted(true);
-      setTimerState(questions[0].time || 20);
+      setTimerState(newQuestions[0]?.time || 20);
     } catch (err) {
       let msg = 'Failed to fetch questions. Please try again.';
       if (err.response) {
@@ -169,11 +162,15 @@ function IntervieweeChat({ user }) {
   }, [chatStarted, timer]);
 
   const handleSubmit = () => {
+    // Add current question to previousQuestions
+    if (questions[progress]?.question) {
+      setPreviousQuestions(prev => [...prev, questions[progress].question]);
+    }
     dispatch(answerQuestion(answer || '[No answer]'));
     setAnswer('');
-    if (interview.progress < QUESTION_SET.length - 1) {
-      dispatch(nextQuestion());
-      setTimerState(QUESTION_SET[interview.progress + 1].time);
+    if (progress < questions.length - 1) {
+      setProgress(progress + 1);
+      setTimerState(questions[progress + 1]?.time || 20);
     } else {
       dispatch(finishInterview());
       message.success('Interview finished!');
@@ -220,10 +217,10 @@ function IntervieweeChat({ user }) {
         </Button>
       )}
       {apiError && <div style={{ color: 'red', marginTop: 8 }}>{apiError}</div>}
-      {chatStarted && (
+      {chatStarted && questions.length > 0 && (
         <div style={{ marginTop: 24 }}>
-          <Card type="inner" title={`Question ${interview.progress + 1} (${QUESTION_SET[interview.progress].level})`}>
-            <p>{QUESTION_SET[interview.progress].text}</p>
+          <Card type="inner" title={`Question ${progress + 1} (${questions[progress].level})`}>
+            <p>{questions[progress].question}</p>
             <p>Time left: <b>{timer}s</b></p>
             <Input.TextArea
               value={answer}
