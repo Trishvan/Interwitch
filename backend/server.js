@@ -170,13 +170,13 @@ function isInterviewerFromClaims(user) {
 
 // Endpoint to get current user info and role (Firebase claim-based)
 app.get('/api/me', verifyToken, (req, res) => {
-  console.log('Decoded Firebase user:', req.user); // Debug log
   const { email, name, uid, interviewer, customClaims } = req.user;
   res.json({
     email,
     name,
     uid,
-    isInterviewer: isInterviewerFromClaims(req.user)
+    isInterviewer: isInterviewerFromClaims(req.user),
+    role: isInterviewerFromClaims(req.user) ? 'interviewer' : 'candidate'
   });
 });
 
@@ -185,35 +185,23 @@ app.get('/api/health', (req, res) => res.send('OK'));
 
 // Add interviewer email to Firestore and set custom claim
 app.post('/api/add-interviewer', verifyToken, async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email required' });
+  const { email, name = '', uid } = req.body;
+  if (!email || !uid) return res.status(400).json({ error: 'Email and uid required' });
   try {
-    // Add to Firestore collection with random doc ID
-    await db.collection('interviewer').add({ email });
-    // Run setInterviewerClaim.js with the email as argument
-    exec(`node ./backend/setInterviewerClaim.js ${email}`, (error, stdout, stderr) => {
-      if (error) {
-        console.error('setInterviewerClaim.js error:', error, stderr);
-        return res.status(500).json({ error: 'Failed to set interviewer claim', details: stderr });
-      }
-      console.log('setInterviewerClaim.js output:', stdout);
-      res.json({ success: true, message: `Interviewer claim set for ${email}` });
-    });
+    // Set custom claim directly using Admin SDK
+    const user = await admin.auth().getUserByEmail(email);
+    await admin.auth().setCustomUserClaims(user.uid, { interviewer: true });
+    // Create/update user doc in 'users' collection with required fields (no customClaims field)
+    await db.collection('users').doc(uid).set({
+      email,
+      name,
+      uid,
+      interviewer: true
+    }, { merge: true });
+    res.json({ success: true, message: `Interviewer claim set and user doc created for ${email}` });
   } catch (err) {
     console.error('Error adding interviewer:', err);
     res.status(500).json({ error: 'Failed to add interviewer' });
-  }
-});
-
-// Check if email is in interviewer collection (any doc with matching email field)
-app.get('/api/check-interviewer', async (req, res) => {
-  const { email } = req.query;
-  if (!email) return res.status(400).json({ isInterviewer: false });
-  try {
-    const snapshot = await db.collection('interviewer').where('email', '==', email).get();
-    res.json({ isInterviewer: !snapshot.empty });
-  } catch (err) {
-    res.status(500).json({ isInterviewer: false });
   }
 });
 

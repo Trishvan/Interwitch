@@ -4,6 +4,7 @@ import storage from 'redux-persist/lib/storage';
 import { combineReducers } from 'redux';
 import candidateReducer from './slices/candidateSlice';
 import interviewReducer from './slices/interviewSlice';
+import { FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER } from './rtk-persist-actions';
 
 const persistConfig = {
   key: 'root',
@@ -19,6 +20,12 @@ const persistedReducer = persistReducer(persistConfig, rootReducer);
 
 export const store = configureStore({
   reducer: persistedReducer,
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware({
+      serializableCheck: {
+        ignoredActions: [FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER],
+      },
+    }),
 });
 
 export const persistor = persistStore(store);
