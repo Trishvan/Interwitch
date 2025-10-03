@@ -1,5 +1,5 @@
 // setInterviewerClaim.js
-// Usage: node setInterviewerClaim.js
+// Usage: node setInterviewerClaim.js <email>
 // Make sure GOOGLE_APPLICATION_CREDENTIALS is set to your Firebase service account JSON
 
 import admin from 'firebase-admin';
@@ -15,8 +15,8 @@ try {
   });
 }
 
-// Replace with the email of the user you want to make an interviewer
-const email = 'gogaf80497@protonza.com'; // <-- CHANGE THIS
+// Get email from command-line argument (only needed for setInterviewerClaim)
+const email = process.argv[2];
 
 async function setInterviewerClaim() {
   try {
@@ -28,4 +28,27 @@ async function setInterviewerClaim() {
   }
 }
 
-setInterviewerClaim();
+// Utility: Print all docs in a collection
+async function printCollection(name) {
+  const db = admin.firestore();
+  const snapshot = await db.collection(name).get();
+  console.log(`\nCollection: ${name}`);
+  snapshot.forEach(doc => {
+    console.log(doc.id, doc.data());
+  });
+}
+
+// If run with --list, print both collections and exit
+if (process.argv.includes('--list')) {
+  (async () => {
+    await printCollection('intervierwer');
+    await printCollection('results');
+    process.exit(0);
+  })();
+} else {
+  if (!email) {
+    console.error('Usage: node setInterviewerClaim.js <email>');
+    process.exit(1);
+  }
+  setInterviewerClaim();
+}

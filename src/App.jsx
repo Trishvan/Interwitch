@@ -20,6 +20,7 @@ function App() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [accountType, setAccountType] = useState('candidate'); // candidate or interviewer
+  const [name, setName] = useState(''); // <-- Add name state
   const navigate = useNavigate();
 
   React.useEffect(() => {
@@ -67,10 +68,41 @@ function App() {
   const handleAuth = async () => {
     setError('');
     try {
+      let cred;
       if (isLogin) {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
+        // Check if email is in interviewers collection
+        let isInterviewerEmail = false;
+        try {
+          const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/check-interviewer?email=${encodeURIComponent(email)}`);
+          const data = await res.json();
+          isInterviewerEmail = !!data.isInterviewer;
+        } catch (e) {
+          // If check fails, fallback to user selection
+        }
+        // Create user and set displayName
+        cred = await createUserWithEmailAndPassword(auth, email, password);
+        if (name) {
+          await cred.user.updateProfile({ displayName: name });
+        }
+        // If interviewer (by db or user selection), call backend to set claim
+        if (accountType === 'interviewer' || isInterviewerEmail) {
+          try {
+            await fetch(`${import.meta.env.VITE_API_URL || ''}/api/add-interviewer`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${await cred.user.getIdToken()}`,
+              },
+              body: JSON.stringify({ email }),
+            });
+            setAccountType('interviewer');
+          } catch (e) {
+            // Optionally handle error
+            console.error('Failed to set interviewer claim:', e);
+          }
+        }
       }
       setAuthModal(false);
     } catch (err) {
@@ -120,6 +152,15 @@ function App() {
         closable={false}
       >
         <div style={{ marginBottom: 16 }}>
+          {!isLogin && (
+            <input
+              type="text"
+              placeholder="Full Name"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              style={{ width: '100%', marginBottom: 8 }}
+            />
+          )}
           <input
             type="email"
             placeholder="Email"

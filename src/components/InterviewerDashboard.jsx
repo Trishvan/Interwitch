@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Typography, message } from 'antd';
+import { auth } from '../firebase';
 
 const { Title } = Typography;
 
@@ -11,13 +12,23 @@ function InterviewerDashboard() {
     async function fetchCandidates() {
       setLoading(true);
       try {
-        const token = localStorage.getItem('token');
-        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/candidates`, {
+        const user = auth.currentUser;
+        if (!user) throw new Error('Not authenticated');
+        const token = await user.getIdToken();
+        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/results`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error('Failed to fetch candidates');
         const data = await res.json();
-        setCandidates(data);
+        // Normalize for table: name/email/score/summary
+        const normalized = data.map(item => ({
+          id: item.id,
+          name: item.name || '',
+          email: item.Email || item.email || '',
+          score: item.score || '',
+          summary: item.summary || '',
+        }));
+        setCandidates(normalized);
       } catch (err) {
         message.error('Could not load candidates');
       } finally {
@@ -35,6 +46,7 @@ function InterviewerDashboard() {
           { title: 'Name', dataIndex: 'name', key: 'name' },
           { title: 'Email', dataIndex: 'email', key: 'email' },
           { title: 'Score', dataIndex: 'score', key: 'score', sorter: true },
+          { title: 'Summary', dataIndex: 'summary', key: 'summary', render: t => <span style={{ whiteSpace: 'pre-line' }}>{t}</span> },
         ]}
         dataSource={candidates}
         rowKey="id"

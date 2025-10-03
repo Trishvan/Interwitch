@@ -6,6 +6,7 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from "@google/genai";
 import { getFirestore } from 'firebase-admin/firestore';
+import { exec } from 'child_process';
 dotenv.config();
 
 const app = express();
@@ -32,41 +33,6 @@ async function verifyToken(req, res, next) {
     res.status(401).json({ error: 'Invalid token' });
   }
 }
-
-// Example: Get candidates
-app.get('/api/candidates', verifyToken, async (req, res) => {
-  try {
-    const snapshot = await db.collection('candidates').orderBy('score', 'desc').get();
-    const candidates = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    res.json(candidates);
-  } catch (err) {
-    console.error('Firestore get candidates error:', err);
-    res.status(500).json({ error: 'Failed to fetch candidates' });
-  }
-});
-
-// Example: Add candidate (from authenticated user)
-app.post('/api/candidates', verifyToken, async (req, res) => {
-  // Use authenticated user info for candidate
-  const { name, email, uid } = req.user;
-  const { phone, score, summary, chat_history } = req.body;
-  try {
-    const docRef = await db.collection('candidates').add({
-      name: name || '',
-      email: email || '',
-      uid: uid || '',
-      phone,
-      score,
-      summary,
-      chat_history
-    });
-    const doc = await docRef.get();
-    res.json({ id: doc.id, ...doc.data() });
-  } catch (err) {
-    console.error('Firestore add candidate error:', err);
-    res.status(500).json({ error: 'Failed to add candidate' });
-  }
-});
 
 // Gemini API endpoint
 app.post('/api/generate-questions', verifyToken, async (req, res) => {
@@ -113,17 +79,87 @@ app.post('/api/generate-questions', verifyToken, async (req, res) => {
   }
 });
 
-// Add results endpoint to Firestore
-app.post('/api/results', verifyToken, async (req, res) => {
-  const { candidateId, results } = req.body;
+// Get all user results
+app.get('/api/results', verifyToken, async (req, res) => {
   try {
-    // Store results under a 'results' collection, with candidateId as a field
-    const docRef = await db.collection('results').add({ candidateId, results, createdAt: new Date() });
-    const doc = await docRef.get();
+    const snapshot = await db.collection('results').get();
+    const results = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    res.json(results);
+  } catch (err) {
+    console.error('Firestore get results error:', err);
+    res.status(500).json({ error: 'Failed to fetch results' });
+  }
+});
+
+// Get a single user's results by UID
+app.get('/api/results/:uid', verifyToken, async (req, res) => {
+  try {
+    const doc = await db.collection('results').doc(req.params.uid).get();
+    if (!doc.exists) return res.status(404).json({ error: 'User not found' });
     res.json({ id: doc.id, ...doc.data() });
   } catch (err) {
-    console.error('Firestore add results error:', err);
-    res.status(500).json({ error: 'Failed to add results' });
+    console.error('Firestore get user result error:', err);
+    res.status(500).json({ error: 'Failed to fetch user result' });
+  }
+});
+
+// Create/update a user's results (UID from auth)
+app.post('/api/results', verifyToken, async (req, res) => {
+  const { uid, email } = req.user;
+  const { Easy = '', Medium = '', Hard = '' } = req.body;
+  try {
+    await db.collection('results').doc(uid).set({
+      Email: String(email || ''),
+      Easy: String(Easy),
+      Medium: String(Medium),
+      Hard: String(Hard)
+    }, { merge: true });
+    const doc = await db.collection('results').doc(uid).get();
+    res.json({ id: doc.id, ...doc.data() });
+  } catch (err) {
+    console.error('Firestore add/update result error:', err);
+    res.status(500).json({ error: 'Failed to add/update result' });
+  }
+});
+
+// Calculate score and summary after 6th question
+app.post('/api/score-summary', verifyToken, async (req, res) => {
+  const { uid, email } = req.user;
+  const { answers = [], questions = [], name = '' } = req.body; // Accept name from frontend
+  if (!Array.isArray(answers) || answers.length !== 6) {
+    return res.status(400).json({ error: 'Must provide 6 answers' });
+  }
+  try {
+    // Use Gemini to generate score and summary
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const prompt = `You are an expert technical interviewer. Given the following 6 interview questions and the candidate's answers, do the following:\n\n1. Assign a final score (0-10) for the candidate's overall performance.\n2. Write a short, 2-3 sentence summary of the candidate's strengths and weaknesses.\n\nQuestions and Answers:\n${questions.map((q, i) => `Q${i+1}: ${q}\nA${i+1}: ${answers[i]}`).join('\n')}\n\nReturn a JSON object with fields: score, summary.`;
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+    });
+    let text = response?.candidates?.[0]?.content?.parts?.[0]?.text || response.text || '';
+    text = text.replace(/^```json[\r\n]+|^```[\r\n]+|```$/gim, '').trim();
+    let score = '', summary = '';
+    try {
+      const parsed = JSON.parse(text);
+      score = String(parsed.score || '');
+      summary = String(parsed.summary || '');
+    } catch (e) {
+      console.error('Failed to parse Gemini score/summary:', text);
+    }
+    // Save to Firestore, including name
+    await db.collection('results').doc(uid).set({
+      Email: String(email || ''),
+      name: String(name || ''),
+      score,
+      summary,
+      answers,
+      questions
+    }, { merge: true });
+    res.json({ score, summary });
+  } catch (err) {
+    console.error('Gemini score/summary error:', err);
+    res.status(500).json({ error: 'Failed to calculate score/summary', details: err.message });
   }
 });
 
@@ -146,6 +182,40 @@ app.get('/api/me', verifyToken, (req, res) => {
 
 // Health check
 app.get('/api/health', (req, res) => res.send('OK'));
+
+// Add interviewer email to Firestore and set custom claim
+app.post('/api/add-interviewer', verifyToken, async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  try {
+    // Add to Firestore collection with random doc ID
+    await db.collection('interviewer').add({ email });
+    // Run setInterviewerClaim.js with the email as argument
+    exec(`node ./backend/setInterviewerClaim.js ${email}`, (error, stdout, stderr) => {
+      if (error) {
+        console.error('setInterviewerClaim.js error:', error, stderr);
+        return res.status(500).json({ error: 'Failed to set interviewer claim', details: stderr });
+      }
+      console.log('setInterviewerClaim.js output:', stdout);
+      res.json({ success: true, message: `Interviewer claim set for ${email}` });
+    });
+  } catch (err) {
+    console.error('Error adding interviewer:', err);
+    res.status(500).json({ error: 'Failed to add interviewer' });
+  }
+});
+
+// Check if email is in interviewer collection (any doc with matching email field)
+app.get('/api/check-interviewer', async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ isInterviewer: false });
+  try {
+    const snapshot = await db.collection('interviewer').where('email', '==', email).get();
+    res.json({ isInterviewer: !snapshot.empty });
+  } catch (err) {
+    res.status(500).json({ isInterviewer: false });
+  }
+});
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));

@@ -57,6 +57,9 @@ function IntervieweeChat({ user }) {
   const [questions, setQuestions] = useState([]); // Store dynamic questions
   const [previousQuestions, setPreviousQuestions] = useState([]); // Track all previous questions
   const [progress, setProgress] = useState(0); // Track current question index
+  const [answers, setAnswers] = useState([]); // Store all answers
+  const [finalResult, setFinalResult] = useState(null); // { score, summary }
+  const [resultModalVisible, setResultModalVisible] = useState(false);
   const dispatch = useDispatch();
 
   const handleResume = async (file) => {
@@ -161,11 +164,15 @@ function IntervieweeChat({ user }) {
     }
   }, [chatStarted, timer]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     // Add current question to previousQuestions
     if (questions[progress]?.question) {
       setPreviousQuestions(prev => [...prev, questions[progress].question]);
     }
+    // Store answer
+    const newAnswers = [...answers];
+    newAnswers[progress] = answer || '[No answer]';
+    setAnswers(newAnswers);
     dispatch(answerQuestion(answer || '[No answer]'));
     setAnswer('');
     if (progress < questions.length - 1) {
@@ -173,8 +180,35 @@ function IntervieweeChat({ user }) {
       setTimerState(questions[progress + 1]?.time || 20);
     } else {
       dispatch(finishInterview());
-      message.success('Interview finished!');
+      message.success('Interview finished! Calculating score...');
       setChatStarted(false);
+      // Call /api/score-summary with answers and questions
+      try {
+        const token = await user.getIdToken();
+        const candidateName = user.displayName || fields.name || '';
+        const res = await axios.post(
+          import.meta.env.VITE_API_URL + '/api/score-summary',
+          {
+            answers: newAnswers,
+            questions: questions.map(q => q.question),
+            name: candidateName,
+          },
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        setFinalResult(res.data);
+        setResultModalVisible(true);
+      } catch (err) {
+        let msg = 'Failed to calculate score/summary.';
+        if (err.response && err.response.data && err.response.data.error) {
+          msg += ' ' + err.response.data.error;
+        } else if (err.message) {
+          msg += ' ' + err.message;
+        }
+        setFinalResult({ score: '', summary: '', error: msg });
+        setResultModalVisible(true);
+      }
     }
   };
 
@@ -205,6 +239,21 @@ function IntervieweeChat({ user }) {
           {missing.includes('phone') && <Form.Item name="phone" label="Phone" rules={[{ required: true }]}> <Input /> </Form.Item>}
           <Button type="primary" htmlType="submit">Submit</Button>
         </Form>
+      </Modal>
+      <Modal
+        title="Interview Result"
+        open={resultModalVisible}
+        footer={<Button type="primary" onClick={() => setResultModalVisible(false)}>Close</Button>}
+        onCancel={() => setResultModalVisible(false)}
+      >
+        {finalResult?.error ? (
+          <div style={{ color: 'red' }}>{finalResult.error}</div>
+        ) : (
+          <>
+            <Title level={4}>Final Score: {finalResult?.score ?? ''}</Title>
+            <p><b>Summary:</b> {finalResult?.summary ?? ''}</p>
+          </>
+        )}
       </Modal>
       {!chatStarted && (
         <Button

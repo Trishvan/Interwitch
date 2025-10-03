@@ -1,7 +1,0 @@
-To fully remove Docker from this project, delete the following files:
-
-- docker-compose.yml
-- frontend/Dockerfile
-- backend/Dockerfile
-
-Then run the backend and frontend locally as described in the README.
