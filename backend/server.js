@@ -67,9 +67,12 @@ app.post('/api/generate-questions', verifyToken, async (req, res) => {
     } catch (e) {
       console.error('Failed to parse Gemini response as JSON:', text);
     }
-    // Remove time property from each question
+    // Remove time property from each question and add correct time based on level
     const safeQuestions = Array.isArray(questions)
-      ? questions.map(({ time, ...q }) => q)
+      ? questions.map(q => ({
+          ...q,
+          time: q.level === 'Easy' ? 20 : q.level === 'Medium' ? 40 : q.level === 'Hard' ? 60 : 20
+        }))
       : [];
     res.json({ questions: safeQuestions });
   } catch (err) {
